@@ -1,0 +1,7 @@
+{
+  "name": "CareerTrack",
+  "description": "An autonomous career memory agent that captures, structures, and refines work activities for performance appraisals with minimal user effort.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
