@@ -1,91 +1,72 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Always use the required initialization format with named apiKey parameter
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const CAPTURE_ENTRY_SCHEMA = {
   type: Type.OBJECT,
   properties: {
-    entry_id: {
+    entry_id: { type: Type.STRING },
+    thought_signature: { type: Type.STRING },
+    timestamp: { type: Type.STRING },
+    category: { 
       type: Type.STRING,
-      description: "A unique identifier for the entry.",
+      description: "Must be exactly 'achievement', 'challenge', or 'learning' in lowercase.",
     },
-    thought_signature: {
+    skills: { type: Type.ARRAY, items: { type: Type.STRING } },
+    impact_summary: { type: Type.STRING },
+    confidence_score: { 
       type: Type.STRING,
-      description: "A unique reasoning signature for continuity (e.g., 'technical-growth-challenge').",
+      description: "Must be exactly 'low', 'medium', or 'high'."
     },
-    timestamp: {
-      type: Type.STRING,
-      description: "ISO 8601 timestamp of the entry.",
-    },
-    raw_input: {
-      type: Type.STRING,
-      description: "The original text provided by the user.",
-    },
-    category: {
-      type: Type.STRING,
-      description: "Must be 'achievement', 'challenge', or 'learning'.",
-    },
-    skills: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "Specific skills inferred from the input.",
-    },
-    impact_summary: {
-      type: Type.STRING,
-      description: "A concise, conservative summary of the inferred impact.",
-    },
-    confidence_score: {
-      type: Type.STRING,
-      description: "Must be 'low', 'medium', or 'high'.",
-    },
-    evidence_links: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "Extracted links or references if present in input.",
-    },
-    refinement_state: {
-      type: Type.STRING,
-      description: "Initial state, should be 'pending'.",
-    }
+    evidence_links: { type: Type.ARRAY, items: { type: Type.STRING } },
+    refinement_state: { type: Type.STRING },
   },
   required: [
     "entry_id", 
     "thought_signature", 
     "timestamp", 
-    "raw_input", 
     "category", 
     "skills", 
     "impact_summary", 
     "confidence_score", 
-    "evidence_links", 
     "refinement_state"
   ],
 };
 
-export const captureEntryTool = async (input: string) => {
-  const now = new Date().toISOString();
+export const captureEntryTool = async (input: string, currentTimeIso: string, timezone: string) => {
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
-      Role: CareerTrack Autonomous Agent
+      Role: CareerTrack Autonomous Agent (Strict Performance Auditor)
       Task: capture_entry
       
-      Interpret the following user input as a raw career activity and output a structured memory object.
+      CONTEXT:
+      Current Date/Time: ${currentTimeIso}
+      User Timezone: ${timezone}
       
-      REASONING & SAFETY GUARDRAILS:
-      - If information is missing, acknowledge uncertainty in the impact_summary.
-      - Never exaggerate impact.
-      - Never assume promotions, outcomes, or recognition.
-      - Prefer factual summaries over persuasive language.
+      Interpret the user input and output a structured memory object.
       
-      Steps:
-      1. Determine category: achievement, challenge, or learning.
-      2. Infer relevant skills demonstrated.
-      3. Generate a concise impact summary following guardrails.
-      4. Assign a confidence score (low, medium, high).
-      5. Create a unique Thought Signature for long-term continuity.
+      CATEGORY RULES:
+      - 'achievement': A positive outcome, successful delivery, or milestone.
+      - 'challenge': A significant technical or process obstacle faced.
+      - 'learning': Acquisition of a new skill or insight from a situation.
+      
+      CRITICAL CONFIDENCE SCORING RULES:
+      You MUST be a tough critic. High-integrity appraisals require specific data.
+      
+      Set confidence_score to 'low' IF:
+      - The input is generic or vague (e.g., "Fixed a bug", "Worked on a project").
+      - Lacks specific project names, service names, or technical context.
+      - Extremely short.
+      
+      Set confidence_score to 'medium' IF:
+      - It describes a specific task or feature with technical context (e.g., "Fixed timeouts in the payment service").
+      - It names a specific project, service, or stakeholder.
+      - BUT it still lacks hard metrics (percentages, numbers, ROI, time saved).
+      
+      Set confidence_score to 'high' ONLY IF:
+      - It contains clear Action + Result + Metric (e.g., "Optimized DB query [Action] reducing latency by 40% [Metric] for the Checkout service [Result]").
       
       Input: "${input}"
     `,
@@ -97,5 +78,18 @@ export const captureEntryTool = async (input: string) => {
 
   const text = response.text;
   if (!text) throw new Error("No response from agent");
-  return JSON.parse(text);
+  const result = JSON.parse(text);
+  
+  // Normalize category and confidence to lowercase to ensure UI filters work accurately
+  if (result.category) {
+    result.category = result.category.toLowerCase().trim();
+  }
+  if (result.confidence_score) {
+    result.confidence_score = result.confidence_score.toLowerCase().trim();
+  }
+  
+  if (!result.timestamp || result.timestamp.includes("2023")) {
+    result.timestamp = currentTimeIso;
+  }
+  return result;
 };
