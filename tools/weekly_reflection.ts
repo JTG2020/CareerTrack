@@ -26,6 +26,7 @@ const REFLECTION_OUTPUT_SCHEMA = {
           evidence_links: { type: Type.ARRAY, items: { type: Type.STRING } },
           refinement_state: { type: Type.STRING },
           clarification_question: { type: Type.STRING },
+          user_clarification_response: { type: Type.STRING },
         },
         required: [
           "entry_id", 
@@ -66,29 +67,25 @@ export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: str
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
-      Role: CareerTrack Autonomous Agent
-      Task: weekly_reflection
-      Current Date: ${now.toISOString()}
-      User Timezone: ${timezone}
+      SYSTEM: You are CareerTrack, a long-running autonomous career memory agent.
+      Your purpose is to capture, structure, refine, and summarize a user's work activities over time for performance appraisals.
       
-      Review the following career memory entries from the last 7 days.
+      CORE PRINCIPLES:
+      - Maintain long-term continuity using Thought Signatures.
+      - Perform self-correction and refinement without frequent user interruption.
+      - You are an autonomous agent that reasons over time, revisits past entries, and improves data quality continuously.
       
       REASONING & SAFETY GUARDRAILS:
-      - Maintain valid categories: 'achievement', 'challenge', or 'learning'.
-      - Use the Current Date for context. Do NOT suggest dates from 2023.
-      - If information is missing, acknowledge uncertainty.
-      - Never exaggerate impact.
-      - Never assume promotions, outcomes, or recognition.
+      - Acknowledge uncertainty.
+      - Never exaggerate impact or assume outcomes (promotions, recognition).
       - Prefer factual summaries over persuasive language.
+
+      TASK: weekly_reflection
+      Review and refine the career memory entries from the last 7 days. Merge related entries using Thought Signatures.
       
-      Steps:
-      1. Detect duplicates or overlapping work.
-      2. Merge related entries using Thought Signatures as logic bridges. 
-         - If merging, consolidate the impact_summary into a single, high-integrity achievement.
-      3. Improve impact summaries ONLY where collective evidence across multiple entries exists.
-      4. Promote refinement_state to 'refined' for all processed entries.
-      5. Identify patterns in skills and ownership.
-      
+      CONTEXT:
+      Current Date: ${now.toISOString()}
+      User Timezone: ${timezone}
       Memory to analyze: ${JSON.stringify(recentEntries)}
     `,
     config: {
@@ -99,15 +96,14 @@ export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: str
 
   const text = response.text;
   if (!text) throw new Error("No response from reflection agent");
-  
   const result = JSON.parse(text);
   
   let refinedRecent = Array.isArray(result.refined_entries) ? result.refined_entries : recentEntries;
-
-  // Final sanitization of categories
   refinedRecent = refinedRecent.map((entry: any) => ({
     ...entry,
-    category: (entry.category || 'achievement').toLowerCase().trim()
+    category: (entry.category || 'achievement').toLowerCase().trim(),
+    skills: Array.isArray(entry.skills) ? entry.skills : [],
+    evidence_links: Array.isArray(entry.evidence_links) ? entry.evidence_links : []
   }));
   
   return {

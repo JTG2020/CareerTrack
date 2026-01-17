@@ -9,61 +9,77 @@ const ATTACH_EVIDENCE_SCHEMA = {
   properties: {
     match_id: {
       type: Type.STRING,
-      description: "The entry_id of the most relevant memory entry.",
+      description: "The entry_id of the most relevant memory entry that matches the artifact. Provide the most likely ID even if is_match is false.",
     },
     reasoning: {
       type: Type.STRING,
-      description: "Brief reasoning for why this artifact supports the selected entry.",
+      description: "Brief reasoning for why this artifact supports or does not support the selected entry.",
     },
     suggested_confidence: {
       type: Type.STRING,
-      description: "The new confidence level: 'medium' or 'high'.",
+      description: "The new confidence level: 'medium' or 'high'. Upgrading based on evidence strength.",
     },
     is_match: {
       type: Type.BOOLEAN,
-      description: "Whether a convincing match was found.",
+      description: "True ONLY if a convincing logical link exists between the artifact and an entry.",
     }
   },
   required: ["match_id", "reasoning", "suggested_confidence", "is_match"],
 };
 
 export const attachEvidenceTool = async (artifact: string, entries: CareerEntry[], mimeType: string = 'text/plain') => {
-  // We send metadata of entries to save tokens while providing enough context for matching
   const entryContext = entries.map(e => ({
     id: e.entry_id,
     summary: e.impact_summary,
     signature: e.thought_signature,
-    category: e.category
+    category: e.category,
+    raw: e.raw_input
   }));
+
+  const isImage = mimeType.startsWith('image/');
 
   const contents: any[] = [
     {
       text: `
-        Role: CareerTrack Autonomous Agent
-        Task: attach_evidence
+        SYSTEM: You are CareerTrack, a long-running autonomous career memory agent.
+        Your purpose is to capture, structure, refine, and summarize a user's work activities over time for performance appraisals.
         
-        Analyze the provided artifact and determine which existing career memory entry it supports.
+        CORE PRINCIPLES:
+        - Maintain long-term continuity using Thought Signatures.
+        - Never fabricate achievements or evidence.
+        - You reason over time and improve data quality continuously.
         
-        Entries Context: ${JSON.stringify(entryContext)}
+        REASONING & SAFETY GUARDRAILS:
+        - Acknowledge uncertainty.
+        - Never exaggerate impact; prefer factual summaries over persuasive language.
+        - No assumptions: Do not assume the artifact implies more than it shows.
+
+        TASK: attach_evidence
+        Analyze the provided artifact (text, URL, or image) and determine which existing career memory entry it supports.
         
-        Steps:
-        1. Interpret the artifact's purpose and context.
-        2. Match it to the entry with the most relevant Thought Signature or Impact Summary.
-        3. If it supports an entry, increase its confidence level (e.g., LOW to MEDIUM, or MEDIUM to HIGH).
-        4. If no match is found, set is_match to false.
+        MATCHING STRATEGY:
+        1. Parse Artifact: If it's a URL (e.g., GitHub PR, Jira ticket, Doc link), extract repo names, ticket IDs, or keywords.
+        2. Content Correlation: Compare the artifact's metadata or text content with the 'raw' input and 'summary' of existing entries.
+        3. Thought Signature Alignment: Use the 'signature' (logic bridge) to confirm if the artifact provides proof for that specific reasoning path.
+        4. Temporal Check: If multiple entries match keywords, prefer the one with a timestamp closest to the artifact's context (if detectable).
+        
+        ENTRIES CONTEXT (JSON):
+        ${JSON.stringify(entryContext)}
+        
+        ARTIFACT TO ANALYZE:
+        Content: "${artifact}"
+        Type: ${mimeType}
       `
     }
   ];
 
-  if (mimeType.startsWith('image/')) {
+  if (isImage) {
     contents.push({
       inlineData: {
-        data: artifact.split(',')[1], // Remove base64 header
+        data: artifact.split(',')[1],
         mimeType: mimeType
       }
     });
-  } else {
-    contents.push({ text: `Artifact/Link content: ${artifact}` });
   }
 
   const response = await ai.models.generateContent({
