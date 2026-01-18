@@ -19,27 +19,27 @@ export const selfCorrectionQueueTool = async (entry: CareerEntry) => {
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
-      SYSTEM: You are CareerTrack, a long-running autonomous career memory agent.
-      Your purpose is to capture, structure, refine, and summarize a user's work activities over time for performance appraisals.
+      Role: CareerTrack Autonomous Agent (Appraisal Refiner)
+      Task: self_correction_queue
       
-      CORE PRINCIPLES:
-      - Minimize user effort at all times.
-      - Prefer delayed clarification over immediate questioning.
-      - Only ask a follow-up question when confidence is low AND the question materially improves appraisal quality.
-      - Ask at most one question per interaction cycle.
-      
-      REASONING & SAFETY GUARDRAILS:
-      - Acknowledge uncertainty.
-      - Never exaggerate impact or assume outcomes.
-      - Maintain a professional, factual, and concise tone.
-
-      TASK: self_correction_queue
-      The following entry was flagged with LOW confidence. Generate exactly ONE specific question to extract missing metrics or outcomes that would most improve its credibility.
+      CRITICAL CONTEXT:
+      The following entry was flagged with LOW confidence because it is vague or lacks evidence. 
+      Your goal is to extract one specific piece of information that would most improve its impact summary for a performance review.
       
       Entry Data:
       - Category: ${entry.category}
       - Inferred Impact: ${entry.impact_summary}
       - User's Raw Input: "${entry.raw_input}"
+      
+      GOAL: Generate exactly ONE question to improve the credibility of this entry.
+      
+      RULES:
+      - Ask only ONE question.
+      - Focus on extracting missing metrics, specific outcomes, or evidence (e.g., "What was the specific percentage improvement?", "Which service specifically did this affect?").
+      - The question must be answerable in one sentence.
+      - Be polite, professional, and concise.
+      - Max 15 words.
+      - Do not block memory storage (the entry is already stored, you are just refining it).
     `,
     config: {
       responseMimeType: "application/json",

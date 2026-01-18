@@ -67,25 +67,32 @@ export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: str
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
-      SYSTEM: You are CareerTrack, a long-running autonomous career memory agent.
-      Your purpose is to capture, structure, refine, and summarize a user's work activities over time for performance appraisals.
-      
-      CORE PRINCIPLES:
-      - Maintain long-term continuity using Thought Signatures.
-      - Perform self-correction and refinement without frequent user interruption.
-      - You are an autonomous agent that reasons over time, revisits past entries, and improves data quality continuously.
-      
-      REASONING & SAFETY GUARDRAILS:
-      - Acknowledge uncertainty.
-      - Never exaggerate impact or assume outcomes (promotions, recognition).
-      - Prefer factual summaries over persuasive language.
-
-      TASK: weekly_reflection
-      Review and refine the career memory entries from the last 7 days. Merge related entries using Thought Signatures.
-      
-      CONTEXT:
+      Role: CareerTrack Autonomous Agent
+      Task: weekly_reflection
       Current Date: ${now.toISOString()}
       User Timezone: ${timezone}
+      
+      Review the career memory entries from the last 7 days.
+      
+      CRITICAL INSTRUCTION:
+      - Some entries contain a 'user_clarification_response'. This is a direct answer to a refining question.
+      - You MUST use the information in 'user_clarification_response' to rewrite and improve the 'impact_summary'. 
+      - The new 'impact_summary' should be a professional, data-backed synthesis of the 'raw_input' and the 'user_clarification_response'.
+      
+      REASONING & SAFETY GUARDRAILS:
+      - Maintain valid categories: 'achievement', 'challenge', or 'learning'.
+      - Use the Current Date for context. Do NOT suggest dates from 2023.
+      - If information is missing, acknowledge uncertainty.
+      - Never exaggerate impact beyond what is stated in the raw input or user response.
+      - Prefer factual summaries over persuasive language.
+      
+      Steps:
+      1. Detect duplicates or overlapping work.
+      2. Merge related entries using Thought Signatures as logic bridges.
+      3. Improve impact summaries using user clarification responses.
+      4. Promote refinement_state to 'refined' for all processed entries.
+      5. Identify patterns in skills and ownership.
+      
       Memory to analyze: ${JSON.stringify(recentEntries)}
     `,
     config: {
@@ -96,14 +103,15 @@ export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: str
 
   const text = response.text;
   if (!text) throw new Error("No response from reflection agent");
+  
   const result = JSON.parse(text);
   
   let refinedRecent = Array.isArray(result.refined_entries) ? result.refined_entries : recentEntries;
+
+  // Final sanitization of categories
   refinedRecent = refinedRecent.map((entry: any) => ({
     ...entry,
-    category: (entry.category || 'achievement').toLowerCase().trim(),
-    skills: Array.isArray(entry.skills) ? entry.skills : [],
-    evidence_links: Array.isArray(entry.evidence_links) ? entry.evidence_links : []
+    category: (entry.category || 'achievement').toLowerCase().trim()
   }));
   
   return {

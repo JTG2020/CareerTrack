@@ -46,24 +46,31 @@ export const generateAppraisalSummaryTool = async (entries: CareerEntry[]): Prom
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
     contents: `
-      SYSTEM: You are CareerTrack, a long-running autonomous career memory agent.
-      Your purpose is to capture, structure, refine, and summarize a user's work activities over time for performance appraisals.
+      Role: CareerTrack Autonomous Agent
+      Task: generate_appraisal_summary
       
-      CORE PRINCIPLES:
-      - Use multi-step reasoning when generating summaries.
-      - Never fabricate achievements or evidence.
-      - Maintain long-term continuity and factual integrity.
+      Perform multi-step reasoning over the following career memory to produce a formal, manager-ready appraisal summary.
       
-      REASONING & SAFETY GUARDRAILS:
-      1. ACKNOWLEDGE UNCERTAINTY: If information is missing, acknowledge the gap instead of filling it with generic text.
-      2. NEVER EXAGGERATE: Maintain absolute factual integrity. Do not use puffery or overstate impact.
-      3. NO ASSUMPTIONS: Never assume promotions, salary outcomes, or specific recognitions.
-      4. FACTUAL OVER PERSUASIVE: The report must be a factual summary of performance, not a persuasive sales pitch.
-
-      TASK: generate_appraisal_summary
-      Produce a formal, manager-ready appraisal summary based strictly on the provided career memory. Map every claim directly to stored entries.
+      CRITICAL INSTRUCTION:
+      - Pay close attention to the 'user_clarification_response' fields in the entries. 
+      - These responses contain vital evidence, metrics, and details that significantly strengthen the appraisal narratives.
+      - Ensure 'keyAchievements' reflect the full context provided by both the initial entry and its clarification response.
       
       Career Memory: ${JSON.stringify(entries)}
+      
+      REASONING & SAFETY GUARDRAILS:
+      - If information is missing, acknowledge uncertainty.
+      - Never exaggerate impact.
+      - Never assume promotions, outcomes, or recognition.
+      - Prefer factual summaries over persuasive language.
+      - Every claim MUST map to stored entries.
+      
+      Reasoning Steps:
+      1. Theme Clustering: Identify recurring themes and ownership signals.
+      2. Impact Extraction: Isolate specific team impacts using user responses as primary evidence.
+      3. Leadership & Growth: Detect leadership signals.
+      4. Gap Detection: Analyze for missing competencies or evidence.
+      5. Narrative Synthesis: Produce concise, copy-ready narratives.
     `,
     config: {
       responseMimeType: "application/json",
