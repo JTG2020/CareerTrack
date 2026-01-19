@@ -11,6 +11,13 @@ export enum ConfidenceLevel {
   HIGH = 'high'
 }
 
+export interface AuditLogEntry {
+  timestamp: string;
+  action: string;
+  previous_value?: string;
+  new_value?: string;
+}
+
 export interface CareerEntry {
   entry_id: string;
   thought_signature: string;
@@ -23,16 +30,16 @@ export interface CareerEntry {
   evidence_links: string[];
   refinement_state: 'pending' | 'refined';
   clarification_question?: string;
+  reflection_question?: string;
   user_clarification_response?: string;
+  audit_log: AuditLogEntry[];
 }
 
 export interface AppraisalSummary {
-  period: string;
-  topStrengths: string[];
-  keyAchievements: string[];
-  growthAreas: string[];
   executiveSummary: string;
-  recommendedFocus: string;
+  keyAchievements: string[];
+  skillsAndGrowth: string;
+  areasForDevelopment: string[];
   gapAnalysis: string;
 }
 

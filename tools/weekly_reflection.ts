@@ -25,8 +25,9 @@ const REFLECTION_OUTPUT_SCHEMA = {
           confidence_score: { type: Type.STRING },
           evidence_links: { type: Type.ARRAY, items: { type: Type.STRING } },
           refinement_state: { type: Type.STRING },
-          clarification_question: { type: Type.STRING },
-          user_clarification_response: { type: Type.STRING },
+          clarification_question: { type: Type.STRING, description: "Set to empty string if resolved." },
+          reflection_question: { type: Type.STRING, description: "New question generated for skipped items." },
+          user_clarification_response: { type: Type.STRING, description: "Set to empty string if refined with new data." },
         },
         required: [
           "entry_id", 
@@ -43,57 +44,57 @@ const REFLECTION_OUTPUT_SCHEMA = {
     },
     reflection_summary: {
       type: Type.STRING,
-      description: "A summary of changes: what was merged, what was refined, and any patterns detected."
+      description: "A narrative summary of the week's progress and patterns detected."
+    },
+    change_log: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "A list of autonomous changes made."
     }
   },
-  required: ["refined_entries", "reflection_summary"],
+  required: ["refined_entries", "reflection_summary", "change_log"],
 };
 
-export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: string): Promise<{ refined_entries: CareerEntry[], reflection_summary: string }> => {
+export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: string): Promise<{ 
+  refined_entries: CareerEntry[], 
+  reflection_summary: string, 
+  change_log: string[]
+}> => {
   const now = new Date();
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   
-  const recentEntries = entries.filter(e => new Date(e.timestamp) >= sevenDaysAgo);
-  const olderEntries = entries.filter(e => new Date(e.timestamp) < sevenDaysAgo);
+  // Targets: recent ones, or ones waiting for a response, or skipped ones needing prompts
+  const targetEntries = entries.filter(e => {
+    const isRecent = new Date(e.timestamp) >= sevenDaysAgo;
+    const hasPendingResponse = !!e.user_clarification_response && e.user_clarification_response !== 'skipped';
+    const isSkipped = e.user_clarification_response === 'skipped';
+    return isRecent || hasPendingResponse || isSkipped;
+  });
 
-  if (recentEntries.length === 0) {
-    return { 
-      refined_entries: entries, 
-      reflection_summary: "No recent entries found in the last 7 days to analyze." 
-    };
-  }
+  const staticEntries = entries.filter(e => !targetEntries.includes(e));
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
       Role: CareerTrack Autonomous Agent
       Task: weekly_reflection
-      Current Date: ${now.toISOString()}
-      User Timezone: ${timezone}
       
-      Review the career memory entries from the last 7 days.
+      Review the entries provided.
       
-      CRITICAL INSTRUCTION:
-      - Some entries contain a 'user_clarification_response'. This is a direct answer to a refining question.
-      - You MUST use the information in 'user_clarification_response' to rewrite and improve the 'impact_summary'. 
-      - The new 'impact_summary' should be a professional, data-backed synthesis of the 'raw_input' and the 'user_clarification_response'.
+      STRICT RESOLUTION RULES:
+      1. INTEGRATION: If 'user_clarification_response' is provided and NOT 'skipped':
+         - Incorporate details into 'impact_summary'.
+         - Upgrade 'confidence_score' to 'high'.
+         - Clear 'clarification_question', 'reflection_question', and 'user_clarification_response' (set to "").
       
-      REASONING & SAFETY GUARDRAILS:
-      - Maintain valid categories: 'achievement', 'challenge', or 'learning'.
-      - Use the Current Date for context. Do NOT suggest dates from 2023.
-      - If information is missing, acknowledge uncertainty.
-      - Never exaggerate impact beyond what is stated in the raw input or user response.
-      - Prefer factual summaries over persuasive language.
+      2. SKIPPED HANDLING: If 'user_clarification_response' is 'skipped':
+         - Generate a specific 'reflection_question' to re-prompt the user later (e.g., "Reflect on: Did the Jenkins work actually save time?").
+         - Clear 'clarification_question' and 'user_clarification_response' (set to "").
       
-      Steps:
-      1. Detect duplicates or overlapping work.
-      2. Merge related entries using Thought Signatures as logic bridges.
-      3. Improve impact summaries using user clarification responses.
-      4. Promote refinement_state to 'refined' for all processed entries.
-      5. Identify patterns in skills and ownership.
+      3. REFINEMENT: Ensure professional summaries and lowercase categories.
       
-      Memory to analyze: ${JSON.stringify(recentEntries)}
+      Input Memory: ${JSON.stringify(targetEntries)}
     `,
     config: {
       responseMimeType: "application/json",
@@ -103,21 +104,20 @@ export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: str
 
   const text = response.text;
   if (!text) throw new Error("No response from reflection agent");
-  
   const result = JSON.parse(text);
   
-  let refinedRecent = Array.isArray(result.refined_entries) ? result.refined_entries : recentEntries;
-
-  // Final sanitization of categories
-  refinedRecent = refinedRecent.map((entry: any) => ({
-    ...entry,
-    category: (entry.category || 'achievement').toLowerCase().trim()
+  const processedRecent = result.refined_entries.map((e: any) => ({
+    ...e,
+    clarification_question: e.clarification_question || undefined,
+    reflection_question: e.reflection_question || undefined,
+    user_clarification_response: e.user_clarification_response || undefined
   }));
   
   return {
-    refined_entries: [...refinedRecent, ...olderEntries].sort((a, b) => 
+    refined_entries: [...processedRecent, ...staticEntries].sort((a, b) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     ),
-    reflection_summary: result.reflection_summary || "Reflection completed with no structural changes."
+    reflection_summary: result.reflection_summary,
+    change_log: result.change_log
   };
 };

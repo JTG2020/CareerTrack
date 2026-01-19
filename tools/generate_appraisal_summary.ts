@@ -7,70 +7,62 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const APPRAISAL_OUTPUT_SCHEMA = {
   type: Type.OBJECT,
   properties: {
-    period: { 
+    executiveSummary: { 
       type: Type.STRING,
-      description: "The time frame covered by the memory entries."
-    },
-    topStrengths: { 
-      type: Type.ARRAY, 
-      items: { type: Type.STRING },
-      description: "Core themes or skills that appear frequently with high impact."
+      description: "A high-level 2-3 sentence overview of overall performance and career trajectory. Ready for HR systems."
     },
     keyAchievements: { 
       type: Type.ARRAY, 
       items: { type: Type.STRING },
-      description: "Manager-ready narratives describing specific high-impact achievements."
+      description: "Manager-ready narratives describing specific high-impact achievements. Every claim MUST map to stored entries. Focus on business impact and ownership signals."
     },
-    growthAreas: { 
+    skillsAndGrowth: {
+      type: Type.STRING,
+      description: "A narrative highlighting leadership patterns, technical growth, and skill clusters identified from the memory."
+    },
+    areasForDevelopment: { 
       type: Type.ARRAY, 
       items: { type: Type.STRING },
-      description: "Specific areas for improvement identified from challenges or learnings."
-    },
-    executiveSummary: { 
-      type: Type.STRING,
-      description: "A 2-3 sentence overview of overall performance and trajectory."
-    },
-    recommendedFocus: { 
-      type: Type.STRING,
-      description: "Actionable advice for the next performance period."
+      description: "Specific areas for improvement or growth based on challenges or learnings recorded."
     },
     gapAnalysis: {
       type: Type.STRING,
-      description: "Identification of skills or metrics that are underrepresented in the current memory."
+      description: "Detection of underrepresented areas or missing metrics/evidence that would strengthen the profile."
     }
   },
-  required: ["period", "topStrengths", "keyAchievements", "growthAreas", "executiveSummary", "recommendedFocus", "gapAnalysis"],
+  required: [
+    "executiveSummary", 
+    "keyAchievements", 
+    "skillsAndGrowth", 
+    "areasForDevelopment", 
+    "gapAnalysis"
+  ],
 };
 
 export const generateAppraisalSummaryTool = async (entries: CareerEntry[]): Promise<AppraisalSummary> => {
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
     contents: `
-      Role: CareerTrack Autonomous Agent
+      Role: CareerTrack Autonomous Agent (Senior Performance Analyst)
       Task: generate_appraisal_summary
       
-      Perform multi-step reasoning over the following career memory to produce a formal, manager-ready appraisal summary.
-      
-      CRITICAL INSTRUCTION:
-      - Pay close attention to the 'user_clarification_response' fields in the entries. 
-      - These responses contain vital evidence, metrics, and details that significantly strengthen the appraisal narratives.
-      - Ensure 'keyAchievements' reflect the full context provided by both the initial entry and its clarification response.
+      Generate an appraisal-ready summary using ONLY the stored memory provided below.
       
       Career Memory: ${JSON.stringify(entries)}
       
-      REASONING & SAFETY GUARDRAILS:
-      - If information is missing, acknowledge uncertainty.
-      - Never exaggerate impact.
-      - Never assume promotions, outcomes, or recognition.
-      - Prefer factual summaries over persuasive language.
-      - Every claim MUST map to stored entries.
+      MULTI-STEP REASONING FLOW:
+      1. Cluster entries by themes and skills: Group related activities to identify core competencies.
+      2. Identify business impact and ownership signals: Look for outcomes, metrics, and instances where the user took the lead.
+      3. Highlight leadership and growth patterns: Trace the evolution of responsibilities and technical depth.
+      4. Detect gaps or underrepresented areas: Identify what's missing (e.g., lack of quantitative results for certain projects).
+      5. Produce a concise, manager-ready narrative: Format the output for direct use in HR systems.
       
-      Reasoning Steps:
-      1. Theme Clustering: Identify recurring themes and ownership signals.
-      2. Impact Extraction: Isolate specific team impacts using user responses as primary evidence.
-      3. Leadership & Growth: Detect leadership signals.
-      4. Gap Detection: Analyze for missing competencies or evidence.
-      5. Narrative Synthesis: Produce concise, copy-ready narratives.
+      CONSTRAINTS:
+      - DO NOT invent achievements or exaggerate impact.
+      - Every claim must map directly to one or more stored entries.
+      - Use professional, punchy, and factual language.
+      - If an entry has a 'user_clarification_response', prioritize that specific detail.
+      - If an entry has 'user_clarification_response' as 'skipped', do not treat it as verified high-impact; instead, note the potential gap.
     `,
     config: {
       responseMimeType: "application/json",

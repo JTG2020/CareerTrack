@@ -1,5 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
+import { CareerEntry } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -22,6 +23,22 @@ const CAPTURE_ENTRY_SCHEMA = {
     },
     evidence_links: { type: Type.ARRAY, items: { type: Type.STRING } },
     refinement_state: { type: Type.STRING },
+    duplicate_risk_detected: {
+      type: Type.BOOLEAN,
+      description: "True if the input is highly similar or directly related to an existing entry."
+    },
+    duplicate_confirmation_question: {
+      type: Type.STRING,
+      description: "A question to ask the user if duplicate_risk_detected is true."
+    },
+    is_off_task: {
+      type: Type.BOOLEAN,
+      description: "True if the input is prompt abuse, small talk, or a direct request to generate an appraisal rather than logging an activity."
+    },
+    rejection_message: {
+      type: Type.STRING,
+      description: "A professional response if is_off_task is true, guiding the user back to proper tool usage."
+    }
   },
   required: [
     "entry_id", 
@@ -32,38 +49,44 @@ const CAPTURE_ENTRY_SCHEMA = {
     "skills", 
     "impact_summary", 
     "confidence_score", 
-    "refinement_state"
+    "refinement_state",
+    "duplicate_risk_detected",
+    "is_off_task"
   ],
 };
 
-export const captureEntryTool = async (input: string, currentTimeIso: string, timezone: string) => {
+export const captureEntryTool = async (input: string, existingEntries: CareerEntry[], currentTimeIso: string, timezone: string) => {
+  const context = existingEntries.slice(0, 15).map(e => ({
+    summary: e.impact_summary,
+    date: e.timestamp,
+    category: e.category
+  }));
+
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: 'gemini-3-flash-preview',
     contents: `
-      Role: CareerTrack Autonomous Agent (Factual Capture)
+      Role: CareerTrack Autonomous Agent (Strict Factual Capture)
       Task: capture_entry
       
       CONTEXT:
       Current Date/Time: ${currentTimeIso}
       User Timezone: ${timezone}
-      User Input: "${input}"
+      New Input: "${input}"
       
-      STEPS:
-      1. Determine category: achievement, challenge, or learning.
-      2. Infer relevant skills demonstrated.
-      3. Generate a concise impact summary based on the input.
-      4. Assign a confidence score:
-         - 'low': Input is generic, vague, or lacks metrics/specifics.
-         - 'medium': Describes a specific task but lacks hard numbers.
-         - 'high': Clear Action + Result + Measurable Metric.
-      5. Create a unique Thought Signature (a short string representing your logic bridge).
-      6. Output a structured memory object.
+      STRICT OPERATING PRINCIPLES (GUARDRAILS):
+      1. REJECT OFF-TASK PROMPTS: If the user input is not a work activity (e.g., small talk like "what is your name" or direct commands like "write my appraisal"), set is_off_task to true and provide a rejection_message.
+      2. ACKNOWLEDGE UNCERTAINTY: If information is missing in the user's activity description, acknowledge uncertainty in the impact_summary rather than making assumptions.
+      3. NO EXAGGERATION: Never exaggerate the impact of a task. Prefer conservative, factual summaries.
+      4. NO ASSUMPTIONS: Never assume promotions, specific outcomes, or recognition unless explicitly stated.
+      5. NEUTRAL TONE: Prefer neutral, professional summaries over persuasive or marketing-heavy language.
       
-      RULES:
-      - Be conservative. If impact is unclear, lower confidence instead of guessing.
-      - DO NOT ask follow-up questions during this step.
-      - Ensure category is strictly lowercase 'achievement', 'challenge', or 'learning'.
-      - Set refinement_state to 'pending'.
+      STRICT CONFIDENCE SCORING RULES:
+      1. LOW: Vague activities ("Worked on Jenkins").
+      2. MEDIUM: Specific tasks without metrics ("Finished the UI").
+      3. HIGH: Accomplishments with metrics ("Reduced latency by 20%").
+
+      EXISTING MEMORIES:
+      ${JSON.stringify(context)}
     `,
     config: {
       responseMimeType: "application/json",
@@ -75,14 +98,11 @@ export const captureEntryTool = async (input: string, currentTimeIso: string, ti
   if (!text) throw new Error("No response from agent");
   const result = JSON.parse(text);
   
-  // Normalize fields for UI consistency
   if (result.category) result.category = result.category.toLowerCase().trim();
   if (result.confidence_score) result.confidence_score = result.confidence_score.toLowerCase().trim();
   
-  // Ensure the raw input matches what the user actually typed
   result.raw_input = input;
-  
-  if (!result.timestamp || result.timestamp.includes("2023")) {
+  if (!result.timestamp) {
     result.timestamp = currentTimeIso;
   }
   return result;
