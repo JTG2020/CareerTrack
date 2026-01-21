@@ -15,13 +15,13 @@ const REFLECTION_OUTPUT_SCHEMA = {
           entry_id: { type: Type.STRING },
           thought_signature: { type: Type.STRING },
           timestamp: { type: Type.STRING },
-          raw_input: { type: Type.STRING },
+          raw_input: { type: Type.STRING, description: "A combined or summarized string of all merged raw inputs." },
           category: { 
             type: Type.STRING,
             description: "Must be 'achievement', 'challenge', or 'learning' in lowercase.",
           },
           skills: { type: Type.ARRAY, items: { type: Type.STRING } },
-          impact_summary: { type: Type.STRING },
+          impact_summary: { type: Type.STRING, description: "A synthesized, high-impact summary covering all merged activities." },
           confidence_score: { type: Type.STRING },
           evidence_links: { type: Type.ARRAY, items: { type: Type.STRING } },
           refinement_state: { type: Type.STRING },
@@ -49,7 +49,7 @@ const REFLECTION_OUTPUT_SCHEMA = {
     change_log: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "A list of autonomous changes made."
+      description: "A list of autonomous changes made, specifically noting merges."
     }
   },
   required: ["refined_entries", "reflection_summary", "change_log"],
@@ -77,11 +77,21 @@ export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: str
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
-      Role: CareerTrack Autonomous Agent
+      Role: CareerTrack Autonomous Agent (Refinement & Merging Specialist)
       Task: weekly_reflection
       
-      Review the entries provided.
+      Review the entries provided and perform semantic merging and refinement.
       
+      STRICT MERGING & DE-DUPLICATION RULES:
+      1. SEMANTIC CLUSTERING: Identify entries that are part of the same project, workstream, or goal (e.g., "Improved CI reliability" and "Fixed flaky CI tests").
+      2. MERGE ACTION: If related entries are found, MERGE them into a single, high-impact achievement.
+         - Combine the impact: Synthesize a stronger 'impact_summary' that reflects the cumulative success.
+         - Aggregate skills: Include a unique list of all skills mentioned across the cluster.
+         - Collect evidence: Include all evidence_links from the cluster.
+         - Summarize history: The 'raw_input' should be a concise summary of all inputs in the cluster.
+         - Use the most recent timestamp from the merged cluster for the new entry.
+      3. LOG MERGES: In the 'change_log', specifically note which entries (by summary or ID) were merged into a single achievement.
+
       STRICT RESOLUTION RULES:
       1. INTEGRATION: If 'user_clarification_response' is provided and NOT 'skipped':
          - Incorporate details into 'impact_summary'.
@@ -110,7 +120,8 @@ export const weeklyReflectionTool = async (entries: CareerEntry[], timezone: str
     ...e,
     clarification_question: e.clarification_question || undefined,
     reflection_question: e.reflection_question || undefined,
-    user_clarification_response: e.user_clarification_response || undefined
+    user_clarification_response: e.user_clarification_response || undefined,
+    refinement_state: 'refined'
   }));
   
   return {

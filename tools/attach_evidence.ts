@@ -13,7 +13,7 @@ const ATTACH_EVIDENCE_SCHEMA = {
     },
     reasoning: {
       type: Type.STRING,
-      description: "Brief reasoning for why this artifact supports the selected entry.",
+      description: "Detailed reasoning for why this artifact supports the selected entry, referencing specific context overlaps.",
     },
     suggested_confidence: {
       type: Type.STRING,
@@ -21,36 +21,46 @@ const ATTACH_EVIDENCE_SCHEMA = {
     },
     is_match: {
       type: Type.BOOLEAN,
-      description: "Whether a convincing match was found.",
+      description: "Whether a convincing semantic match was found.",
     }
   },
   required: ["match_id", "reasoning", "suggested_confidence", "is_match"],
 };
 
 export const attachEvidenceTool = async (artifact: string, entries: CareerEntry[], mimeType: string = 'text/plain') => {
-  // We send metadata of entries to save tokens while providing enough context for matching
+  // Extract essential metadata for matching context
   const entryContext = entries.map(e => ({
     id: e.entry_id,
     summary: e.impact_summary,
-    signature: e.thought_signature,
-    category: e.category
+    signature: e.thought_signature, // Anchoring on Thought Signatures
+    category: e.category,
+    timestamp: e.timestamp
   }));
 
   const contents: any[] = [
     {
       text: `
-        Role: CareerTrack Autonomous Agent
+        Role: CareerTrack Autonomous Agent (Evidence Verification Specialist)
         Task: attach_evidence
         
-        Analyze the provided artifact and determine which existing career memory entry it supports.
+        SYSTEM INSTRUCTION: 
+        You are performing an autonomous cross-reference of work artifacts against a career memory log. 
+        Use "Thinking Levels" to process this request:
         
-        Entries Context: ${JSON.stringify(entryContext)}
+        Level 1 (Extraction): Analyze the provided artifact. What is it? (URL, screenshot, log, snippet). What are the key entities, dates, and technical terms?
+        Level 2 (Semantic Bridge): Compare these entities against the Thought Signatures of existing entries. A Thought Signature represents the underlying "intent" or "context" of a work activity.
+        Level 3 (Validation & Self-Correction): Evaluate the probability of a match. Does this artifact definitively prove an outcome? If it contradicts a previous impact claim, self-correct the confidence level downward.
         
-        Steps:
-        1. Interpret the artifact's purpose and context.
-        2. Match it to the entry with the most relevant Thought Signature or Impact Summary.
-        3. If it supports an entry, increase its confidence level (e.g., LOW to MEDIUM, or MEDIUM to HIGH).
-        4. If no match is found, set is_match to false.
+        ENTRIES CONTEXT:
+        ${JSON.stringify(entryContext)}
+        
+        MATCHING RULES:
+        1. PRIORITIZE SIGNATURES: Match based on the "Thought Signature" if semantic similarity is high.
+        2. TEMPORAL PROXIMITY: Favor entries close in time if the semantic match is otherwise ambiguous.
+        3. CONFIDENCE UPGRADES: 
+           - Artifact proves execution -> Upgrade to MEDIUM.
+           - Artifact proves outcome/metric -> Upgrade to HIGH.
+        4. NEGATIVE MATCHES: If no entry fits within a 70% confidence interval, set is_match to false.
       `
     }
   ];
@@ -58,7 +68,7 @@ export const attachEvidenceTool = async (artifact: string, entries: CareerEntry[
   if (mimeType.startsWith('image/')) {
     contents.push({
       inlineData: {
-        data: artifact.split(',')[1], // Remove base64 header
+        data: artifact.split(',')[1], // Remove base64 header if present
         mimeType: mimeType
       }
     });
@@ -66,16 +76,26 @@ export const attachEvidenceTool = async (artifact: string, entries: CareerEntry[
     contents.push({ text: `Artifact/Link content: ${artifact}` });
   }
 
+  // Using Pro with Thinking Config for complex reasoning and self-correction
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-3-pro-preview",
     contents: { parts: contents },
     config: {
       responseMimeType: "application/json",
       responseSchema: ATTACH_EVIDENCE_SCHEMA,
+      thinkingConfig: {
+        thinkingBudget: 4000 // Reserved for deep cross-referencing and self-correction logic
+      }
     },
   });
 
   const text = response.text;
-  if (!text) throw new Error("No response from agent");
-  return JSON.parse(text);
+  if (!text) throw new Error("No response from evidence agent");
+  
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    console.error("Agent returned invalid JSON in evidence matching:", text);
+    throw new Error("Failed to parse evidence match response.");
+  }
 };

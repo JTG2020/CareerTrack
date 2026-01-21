@@ -40,7 +40,11 @@ import {
   History as HistoryIcon,
   MessageCircleQuestion,
   ListTodo,
-  ShieldAlert
+  ShieldAlert,
+  GraduationCap,
+  Camera,
+  Upload,
+  CameraOff
 } from 'lucide-react';
 import { CareerEntry, EntryType, ConfidenceLevel, ProcessingState, AppraisalSummary, AuditLogEntry } from './types';
 import { captureEntryTool } from './tools/capture_entry';
@@ -79,7 +83,12 @@ const App: React.FC = () => {
   
   const [pendingEntry, setPendingEntry] = useState<any | null>(null);
   const [duplicateQuestion, setDuplicateQuestion] = useState<string | null>(null);
-  
+
+  // Camera and Upload State
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -99,6 +108,14 @@ const App: React.FC = () => {
     if (summary) localStorage.setItem('career_track_summary_v15', JSON.stringify(summary));
     localStorage.setItem('career_track_timezone_v15', timezone);
   }, [entries, reflectionData, timezone, summary]);
+
+  // Handle attaching stream to video element once it is rendered
+  useEffect(() => {
+    if (isCameraOpen && cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+      videoRef.current.play().catch(err => console.error("Error playing video:", err));
+    }
+  }, [isCameraOpen, cameraStream]);
 
   const clearMemory = () => {
     if (confirm("Delete all career memories and reset the agent?")) {
@@ -248,6 +265,7 @@ const App: React.FC = () => {
   };
 
   const processEvidence = async (artifact: string, mimeType: string, label: string) => {
+    setProcessing({ isProcessing: true, status: `Agent: Analyzing artifact...` });
     try {
       const result = await attachEvidenceTool(artifact, entries, mimeType);
       if (result.is_match) {
@@ -264,14 +282,87 @@ const App: React.FC = () => {
           }
           return e;
         }));
+      } else {
+        alert("Agent: No relevant match found for this evidence artifact.");
       }
-    } catch (error) { console.error(error); } finally { setProcessing({ isProcessing: false, status: '' }); if (fileInputRef.current) fileInputRef.current.value = ''; setEvidenceInput(''); }
+    } catch (error) { 
+      console.error(error);
+      alert("Failed to analyze evidence.");
+    } finally { 
+      setProcessing({ isProcessing: false, status: '' }); 
+      if (fileInputRef.current) fileInputRef.current.value = ''; 
+      setEvidenceInput(''); 
+    }
   };
 
-  const handleLinkEvidence = async () => { if (!evidenceInput || !evidenceInput.trim() || entries.length === 0) return; setProcessing({ isProcessing: true, status: 'Agent: Analyzing link...' }); await processEvidence(evidenceInput, 'text/plain', evidenceInput); };
+  const handleLinkEvidence = async () => { 
+    if (!evidenceInput || !evidenceInput.trim() || entries.length === 0) return; 
+    await processEvidence(evidenceInput, 'text/plain', evidenceInput); 
+  };
+
+  // Camera Management
+  const startCamera = async () => {
+    try {
+      setProcessing({ isProcessing: true, status: 'Requesting camera...' });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      setCameraStream(stream);
+      setIsCameraOpen(true);
+      setProcessing({ isProcessing: false, status: '' });
+    } catch (err: any) {
+      console.error("Error accessing camera:", err);
+      setProcessing({ isProcessing: false, status: '' });
+      if (err.name === 'NotAllowedError' || err.message?.includes('Permission dismissed')) {
+        alert("Camera permission was dismissed or denied. Please ensure your browser allows camera access for this site.");
+      } else {
+        alert(`Could not access camera: ${err.message || 'Unknown error'}`);
+      }
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setIsCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const context = canvasRef.current.getContext('2d');
+    if (!context) return;
+
+    canvasRef.current.width = videoRef.current.videoWidth;
+    canvasRef.current.height = videoRef.current.videoHeight;
+    context.drawImage(videoRef.current, 0, 0);
+    
+    const base64 = canvasRef.current.toDataURL('image/jpeg', 0.85);
+    stopCamera();
+    processEvidence(base64, 'image/jpeg', `Capture_${new Date().toLocaleTimeString()}`);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target?.result as string;
+      await processEvidence(base64, file.type, file.name);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const stats = {
     achievements: entries.filter(e => (e.category || '').toLowerCase().trim() === EntryType.ACHIEVEMENT).length,
+    challenges: entries.filter(e => (e.category || '').toLowerCase().trim() === EntryType.CHALLENGE).length,
+    learnings: entries.filter(e => (e.category || '').toLowerCase().trim() === EntryType.LEARNING).length,
     pendingActions: entries.filter(e => (e.clarification_question || e.reflection_question) && !e.user_clarification_response).length,
     withEvidence: entries.filter(e => (e.evidence_links || []).length > 0).length,
   };
@@ -283,12 +374,39 @@ const App: React.FC = () => {
           <div className="bg-indigo-600 p-2 rounded-lg text-white shadow-lg"><BrainCircuit size={24} /></div>
           <div><h1 className="font-bold text-xl tracking-tight text-slate-900">CareerTrack</h1><p className="text-[10px] text-indigo-600 font-black uppercase tracking-widest">Memory Agent v4.2</p></div>
         </div>
-        <div className="flex-1 p-4 space-y-1">
+        <div className="flex-1 p-4 space-y-1 overflow-y-auto">
           <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Dashboard" />
           <NavItem active={activeTab === 'queue'} onClick={() => setActiveTab('queue')} icon={<ListTodo size={20} />} label="Refinement Queue" badge={stats.pendingActions} />
           <NavItem active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History size={20} />} label="Memory Log" />
           <NavItem active={activeTab === 'reflection'} onClick={() => setActiveTab('reflection')} icon={<Layers size={20} />} label="Reflections" />
           <NavItem active={activeTab === 'appraisal'} onClick={() => setActiveTab('appraisal')} icon={<FileText size={20} />} label="Appraisal Sync" />
+          
+          <div className="pt-6 pb-2">
+            <h3 className="px-4 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Memory Breakdown</h3>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between px-4 py-2 rounded-xl text-xs font-bold text-slate-600 group hover:bg-emerald-50 transition-all">
+                <div className="flex items-center gap-3">
+                  <Award size={16} className="text-emerald-500" />
+                  <span>Achievements</span>
+                </div>
+                <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md font-black min-w-[24px] text-center">{stats.achievements}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2 rounded-xl text-xs font-bold text-slate-600 group hover:bg-amber-50 transition-all">
+                <div className="flex items-center gap-3">
+                  <Target size={16} className="text-amber-500" />
+                  <span>Challenges</span>
+                </div>
+                <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-md font-black min-w-[24px] text-center">{stats.challenges}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2 rounded-xl text-xs font-bold text-slate-600 group hover:bg-blue-50 transition-all">
+                <div className="flex items-center gap-3">
+                  <GraduationCap size={16} className="text-blue-500" />
+                  <span>Learnings</span>
+                </div>
+                <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-black min-w-[24px] text-center">{stats.learnings}</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div className="p-4 border-t border-slate-100 space-y-3">
            <div className="px-2 pb-2">
@@ -396,10 +514,61 @@ const App: React.FC = () => {
                   </form>
                 </div>
 
-                <div className="lg:col-span-4 bg-white rounded-[40px] shadow-sm border border-slate-200 p-8 md:p-10 flex flex-col justify-between hover:shadow-md transition-shadow">
-                  <div><h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Attach Artifact</h3>
+                <div className="lg:col-span-4 bg-white rounded-[40px] shadow-sm border border-slate-200 p-8 md:p-10 flex flex-col justify-between hover:shadow-md transition-shadow relative overflow-hidden">
+                  {isCameraOpen && (
+                    <div className="absolute inset-0 bg-slate-900 z-40 flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                      <div className="flex-1 relative overflow-hidden bg-black">
+                        <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
+                        <button onClick={stopCamera} className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 p-2 rounded-full text-white backdrop-blur-md transition-all z-50"><XCircle size={24} /></button>
+                      </div>
+                      <div className="p-6 flex justify-center bg-slate-900/80 backdrop-blur-lg">
+                        <button onClick={capturePhoto} className="w-16 h-16 bg-white rounded-full border-4 border-slate-300 active:scale-95 transition-all shadow-xl"></button>
+                      </div>
+                      <canvas ref={canvasRef} className="hidden" />
+                    </div>
+                  )}
+
+                  <div>
+                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Attach Artifact</h3>
                     <div className="space-y-4">
-                      <div className="relative"><input type="text" value={evidenceInput} onChange={(e) => setEvidenceInput(e.target.value)} placeholder="Evidence URL..." className="w-full bg-slate-50 border-none rounded-2xl px-5 py-4 text-sm font-bold shadow-inner" /><button onClick={handleLinkEvidence} disabled={!evidenceInput || !evidenceInput.trim() || entries.length === 0} className="absolute right-2 top-2 p-2 text-indigo-600 hover:bg-indigo-100 rounded-xl transition-colors"><Plus size={20} /></button></div>
+                      {/* URL Input */}
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          value={evidenceInput} 
+                          onChange={(e) => setEvidenceInput(e.target.value)} 
+                          placeholder="Evidence URL or Note..." 
+                          className="w-full bg-slate-50 border-none rounded-2xl px-5 py-4 pr-12 text-sm font-bold shadow-inner focus:ring-2 focus:ring-indigo-100 transition-all" 
+                        />
+                        <button 
+                          onClick={handleLinkEvidence} 
+                          disabled={!evidenceInput || !evidenceInput.trim() || entries.length === 0 || processing.isProcessing} 
+                          className="absolute right-2 top-2 p-2 text-indigo-600 hover:bg-indigo-100 rounded-xl transition-colors disabled:opacity-30"
+                        >
+                          <Plus size={20} />
+                        </button>
+                      </div>
+
+                      {/* File Upload & Camera Buttons */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <button 
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={entries.length === 0 || processing.isProcessing}
+                          className="flex items-center justify-center gap-3 py-4 bg-slate-50 hover:bg-indigo-50 border-2 border-dashed border-slate-200 hover:border-indigo-300 rounded-2xl transition-all group disabled:opacity-50"
+                        >
+                          <Upload size={18} className="text-slate-400 group-hover:text-indigo-500" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 group-hover:text-indigo-600">Document</span>
+                        </button>
+                        <button 
+                          onClick={startCamera}
+                          disabled={entries.length === 0 || processing.isProcessing}
+                          className="flex items-center justify-center gap-3 py-4 bg-slate-50 hover:bg-indigo-50 border-2 border-dashed border-slate-200 hover:border-indigo-300 rounded-2xl transition-all group disabled:opacity-50"
+                        >
+                          <Camera size={18} className="text-slate-400 group-hover:text-indigo-500" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 group-hover:text-indigo-600">Capture</span>
+                        </button>
+                      </div>
+                      <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,.pdf,.doc,.docx,.txt" />
                     </div>
                   </div>
                   <div className="bg-indigo-50/30 p-6 rounded-[32px] border border-indigo-100/50 mt-6 flex items-start gap-4">
@@ -532,6 +701,17 @@ const App: React.FC = () => {
                              <div className="space-y-3">{entry.audit_log.slice(0, 5).map((log, idx) => (<div key={idx} className="text-xs flex gap-3 items-start"><span className="text-slate-300 shrink-0 font-mono">{formatWithTimezone(log.timestamp).split(',')[1]}</span><div><p className="text-slate-600 font-bold">{log.action}</p>{log.new_value && <p className="text-slate-400 italic mt-0.5">"{log.new_value}"</p>}</div></div>))}</div>
                           </div>
                         )}
+                        {entry.evidence_links && entry.evidence_links.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] w-full mb-2 flex items-center gap-2"><Paperclip size={12} /> Evidence Artifacts</h4>
+                             {entry.evidence_links.map((link, idx) => (
+                               <div key={idx} className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-2">
+                                 <CheckCircle2 size={10} />
+                                 {link.length > 20 ? link.substring(0, 20) + '...' : link}
+                               </div>
+                             ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -600,10 +780,6 @@ const ConfidenceIndicator: React.FC<{ level: ConfidenceLevel }> = ({ level }) =>
   const label = level === ConfidenceLevel.HIGH ? 'High' : level === ConfidenceLevel.MEDIUM ? 'Med' : 'Low';
   const textColor = level === ConfidenceLevel.HIGH ? 'text-indigo-600' : level === ConfidenceLevel.MEDIUM ? 'text-amber-600' : 'text-red-600';
   return (<div className="flex items-center gap-2.5"><div className="flex gap-1 items-end h-3">{[1, 2, 3].map(i => (<div key={i} className={`w-1.5 rounded-full transition-all duration-500 ${i <= bars ? colorClass : 'bg-slate-100'}`} style={{ height: `${(i / 3) * 100}%` }} />))}</div><span className={`text-[10px] font-black uppercase tracking-tighter w-8 ${textColor}`}>{label}</span></div>);
-};
-
-const StatCard: React.FC<{ title: string, value: number, icon: React.ReactNode, color: string }> = ({ title, value, icon, color }) => {
-  return (<div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm group hover:shadow-xl transition-all relative overflow-hidden"><div className="flex justify-between items-start mb-8"><div className="p-4 rounded-3xl bg-slate-50 border border-slate-100 shadow-sm">{icon}</div></div><div className="flex items-end justify-between"><h4 className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em]">{title}</h4><span className="text-5xl font-black text-slate-900 leading-none tracking-tighter">{value}</span></div></div>);
 };
 
 export default App;
