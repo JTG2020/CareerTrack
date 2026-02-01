@@ -44,7 +44,8 @@ import {
   GraduationCap,
   Camera,
   Upload,
-  CameraOff
+  CameraOff,
+  Download
 } from 'lucide-react';
 import { CareerEntry, EntryType, ConfidenceLevel, ProcessingState, AppraisalSummary, AuditLogEntry } from './types';
 import { captureEntryTool } from './tools/capture_entry';
@@ -221,6 +222,7 @@ const App: React.FC = () => {
       return e;
     }));
     setClarificationResponse(prev => { const next = { ...prev }; delete next[id]; return next; });
+    // Fix: Corrected property syntax for isProcessing state update
     setProcessing({ isProcessing: false, status: '' });
   };
 
@@ -262,6 +264,39 @@ const App: React.FC = () => {
       setSummary(result);
       setActiveTab('appraisal');
     } catch (error) { console.error(error); } finally { setProcessing({ isProcessing: false, status: '' }); }
+  };
+
+  const handleDownloadAppraisal = () => {
+    if (!summary) return;
+
+    const content = `CAREERTRACK APPRAISAL SUMMARY
+Generated on: ${new Date().toLocaleDateString()}
+
+EXECUTIVE SUMMARY
+${summary.executiveSummary}
+
+KEY ACHIEVEMENTS
+${summary.keyAchievements.map((item, i) => `${i + 1}. ${item}`).join('\n')}
+
+SKILLS AND GROWTH
+${summary.skillsAndGrowth}
+
+AREAS FOR DEVELOPMENT
+${summary.areasForDevelopment.map((item, i) => `${i + 1}. ${item}`).join('\n')}
+
+GAP ANALYSIS
+${summary.gapAnalysis}
+`;
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Appraisal_Summary_${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const processEvidence = async (artifact: string, mimeType: string, label: string) => {
@@ -738,7 +773,28 @@ const App: React.FC = () => {
 
           {activeTab === 'appraisal' && (
             <div className="animate-in fade-in duration-500 space-y-10 pb-20">
-               <header className="flex flex-col md:flex-row md:items-end justify-between gap-6"><div><h2 className="text-4xl font-black text-slate-900 tracking-tight">Appraisal Sync</h2></div><button onClick={handleGenerateSummary} disabled={entries.length === 0 || processing.isProcessing} className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black flex items-center gap-2 shadow-xl shadow-indigo-200 transition-all uppercase tracking-widest text-sm disabled:opacity-50"><RefreshCw size={18} className={processing.isProcessing ? 'animate-spin' : ''} />Regenerate Sync</button></header>
+               <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+                 <div>
+                   <h2 className="text-4xl font-black text-slate-900 tracking-tight">Appraisal Sync</h2>
+                 </div>
+                 <div className="flex gap-3">
+                   {summary && (
+                     <button 
+                       onClick={handleDownloadAppraisal}
+                       className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-4 rounded-2xl font-black flex items-center gap-2 shadow-xl shadow-emerald-200 transition-all uppercase tracking-widest text-sm"
+                     >
+                       <Download size={18} /> Download Summary
+                     </button>
+                   )}
+                   <button 
+                     onClick={handleGenerateSummary} 
+                     disabled={entries.length === 0 || processing.isProcessing} 
+                     className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black flex items-center gap-2 shadow-xl shadow-indigo-200 transition-all uppercase tracking-widest text-sm disabled:opacity-50"
+                   >
+                     <RefreshCw size={18} className={processing.isProcessing ? 'animate-spin' : ''} />Regenerate Sync
+                   </button>
+                 </div>
+               </header>
               {summary && (
                 <div className="space-y-12 animate-in zoom-in-95">
                    <div className="bg-gradient-to-br from-indigo-600 to-violet-900 p-12 md:p-16 rounded-[60px] text-white shadow-2xl"><h3 className="text-indigo-200 text-xs font-black uppercase tracking-[0.3em] mb-6">Executive Summary</h3><p className="text-2xl md:text-4xl font-black leading-tight">{summary.executiveSummary}</p></div>
